@@ -1,23 +1,36 @@
-// Vercel Serverless Function (Node.js)
-// 이 코드는 오직 Vercel 서버에서만 실행되므로 클라이언트에게 API Key가 노출되지 않습니다.
-
+// api/generate.js
 export default async function handler(req, res) {
-  // POST 요청만 허용
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+  // CORS 처리 (필요시)
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
   }
 
-  const { prompt, systemPrompt } = req.body;
-  
-  // Vercel 환경변수에서 API Key 로드
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    return res.status(500).json({ error: 'Server Configuration Error: API key is missing.' });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed. Use POST.' });
   }
 
   try {
-    // 안정화된 프로덕션용 모델 사용 (gemini-2.5-flash)
+    const { prompt, systemPrompt } = req.body;
+    
+    // Vercel Environment Variables에서 API Key를 가져옴
+    // 반드시 Vercel 설정에서 GEMINI_API_KEY를 등록해야 합니다.
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      console.error("API Key is missing in environment variables.");
+      return res.status(500).json({ error: '서버 설정 오류: API Key가 누락되었습니다.' });
+    }
+
+    // Google Gemini API 호출 (최신 flash 모델 사용)
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
@@ -32,17 +45,18 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error?.message || 'Gemini API call failed on server.');
+      console.error('Gemini API Error Response:', data);
+      throw new Error(data.error?.message || 'Google API 호출에 실패했습니다.');
     }
 
-    // 결과 텍스트 추출
+    // AI 응답 텍스트 추출
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
-    // 클라이언트로 결과만 반환 (API Key 없음)
-    res.status(200).json({ text });
+
+    // 클라이언트로 텍스트만 전달 (API Key는 클라이언트로 전달되지 않음)
+    res.status(200).json({ text: text });
 
   } catch (error) {
-    console.error('Serverless Error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Vercel Serverless Function Error:', error);
+    res.status(500).json({ error: error.message || '서버 내부 오류가 발생했습니다.' });
   }
 }
